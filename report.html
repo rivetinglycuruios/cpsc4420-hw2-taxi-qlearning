@@ -1,0 +1,136 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CPSC 4420 HW2 - Charlie McLaurin</title>
+<style>
+  @page { size: letter; margin: 0.75in; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 10.5pt; line-height: 1.42; color: #111; }
+  h1 { font-size: 17pt; margin: 0 0 2px; color: #b5451b; }
+  h2 { page-break-after: avoid; break-after: avoid; font-size: 12.5pt; margin: 18px 0 6px; border-bottom: 1px solid #ccc; padding-bottom: 2px; }
+  .meta { color: #444; margin-bottom: 10px; }
+  table { border-collapse: collapse; margin: 6px 0 10px; font-size: 9.5pt; }
+  th, td { border: 1px solid #bbb; padding: 3px 7px; text-align: left; }
+  th { background: #f1f1f1; }
+  figure { margin: 8px 0 12px; text-align: center; page-break-inside: avoid; }
+  figure img { width: 84%; }
+  figcaption { font-size: 9pt; color: #444; }
+  code { font-family: Consolas, monospace; font-size: 9.5pt; background: #f4f4f4; padding: 0 3px; }
+  pre { font-family: Consolas, monospace; font-size: 8.8pt; background: #f6f6f6; padding: 8px; border: 1px solid #ddd; white-space: pre-wrap; page-break-inside: avoid; }
+  .eq { text-align: center; margin: 6px 0; font-family: "Cambria Math", Cambria, serif; font-size: 11pt; }
+  .pb { page-break-before: always; }
+</style></head><body>
+
+<h1>CPSC 4420: Artificial Intelligence, Assignment 2</h1>
+<div class="meta"><b>Name:</b> Charlie McLaurin &nbsp;·&nbsp; <b>Environment:</b> Gymnasium <code>Taxi-v4</code> &nbsp;·&nbsp; <b>Due:</b> Oct 18, 2026<br>
+<b>GitHub repository:</b> <a href="https://github.com/rivetinglycuruios/cpsc4420-hw2-taxi-qlearning">https://github.com/rivetinglycuruios/cpsc4420-hw2-taxi-qlearning</a></div>
+
+<h2>(A) Environment Description</h2>
+<p><b>Goal.</b> A taxi drives around a 5×5 grid with walls. It has to go to the passenger's location (one of four colored depots: R, G, Y, B), pick the passenger up, drive to the passenger's destination (a different depot), and drop them off, in as few steps as possible.</p>
+<p><b>State space.</b> There are 500 discrete states, encoded as one integer: 25 taxi positions × 5 passenger locations (4 depots or "in taxi") × 4 destinations. 400 of these are reachable during an episode. Because the space is small and discrete, tabular Q-learning applies directly and <b>no discretization is needed</b>.</p>
+<p><b>Action space.</b> 6 discrete actions: 0 = South, 1 = North, 2 = East, 3 = West, 4 = Pickup, 5 = Drop-off.</p>
+<p><b>Transition dynamics.</b> With the default settings (<code>is_rainy=False</code>, <code>fickle_passenger=False</code>), transitions are deterministic. A move shifts the taxi one cell. If a wall or the grid edge is in the way, the taxi stays put and still pays the step cost. Pickup succeeds only when the taxi is on the passenger's cell, and Drop-off succeeds only at the destination with the passenger on board. Every episode starts with a random taxi position, passenger location and destination.</p>
+<p><b>Reward structure.</b> −1 per step, +20 for a correct drop-off, and −10 for an illegal Pickup or Drop-off. The best achievable average return over random starts is about 8.46.</p>
+<p><b>Termination.</b> The episode <i>terminates</i> on a successful drop-off. It is <i>truncated</i> after 200 steps by Gymnasium's TimeLimit wrapper. My agent treats these differently: on termination the update target is just <i>r</i>, and on truncation it still bootstraps from <i>s′</i>, because running out of time isn't a true end state of the MDP.</p>
+<p><b>Settings used.</b> Default <code>Taxi-v4</code> (deterministic). For Part H, I add a separate, controllable noise source with an <code>ActionWrapper</code> (described there).</p>
+
+<h2>(B) Q-Learning Implementation</h2>
+<p>Everything is in <code>qlearning.py</code> and written from scratch. No RL libraries are used besides the Gymnasium environment.</p>
+<ul>
+<li><b>Q-value initialization:</b> a 500×6 NumPy table filled with <code>q_init</code> (default 0).</li>
+<li><b>ε-greedy action selection:</b> with probability ε pick a uniformly random action, otherwise pick argmax<sub>a</sub> Q(s,a) with random tie-breaking (important early on, when every row is all zeros).</li>
+<li><b>Exploration schedule:</b> ε starts at <code>epsilon_start</code> and is multiplied by <code>epsilon_decay</code> after every episode, with a floor of <code>epsilon_min</code>.</li>
+<li><b>Training loop:</b> reset → act → step → update → repeat until terminated or truncated. Per-episode return and step count are recorded.</li>
+<li><b>Terminal handling:</b> the target is <i>r</i> if terminated, otherwise <i>r</i> + γ max<sub>a′</sub> Q(s′,a′).</li>
+<li><b>Update:</b></li>
+</ul>
+<div class="eq">Q(s,a) ← Q(s,a) + α [ r + γ max<sub>a′</sub> Q(s′,a′) − Q(s,a) ]</div>
+<p>Every hyperparameter is a field in a single <code>Config</code> dataclass (<code>alpha, gamma, epsilon_start, epsilon_min, epsilon_decay, episodes, q_init, noise_p, seed</code>), so each experiment is one line, e.g. <code>train(BASE.with_(alpha=0.5))</code>.</p>
+<pre>def update(self, s, a, r, s2, terminated):
+    target = r if terminated else r + self.cfg.gamma * self.Q[s2].max()
+    self.Q[s, a] += self.cfg.alpha * (target - self.Q[s, a])</pre>
+<p><b>Experimental protocol.</b> Every configuration is trained with <b>5 independent seeds</b>. The plots show the seed-average of a 100-episode moving average of training reward, with a ±1 std band across seeds. "Final performance" is the mean training reward over the last 200 episodes. "Learning speed" is the number of episodes until the 100-episode moving average first reaches 0. Greedy evaluation (ε = 0) uses 100 episodes per seed with a fixed set of evaluation start states.</p>
+
+<h2>(C) Baseline Training</h2>
+<table>
+<tr><th>α</th><th>γ</th><th>ε schedule</th><th>Episodes</th><th>Q init</th></tr>
+<tr><td>0.1</td><td>0.99</td><td>1.0 → ×0.995 per episode → floor 0.01 (reaches the floor at ~ep 919)</td><td>3000</td><td>0</td></tr>
+</table>
+<figure><img src="results/C_baseline.png"><figcaption>Figure 1. Baseline training reward. The faint line is one seed's raw episode reward, and the bold line is the 100-episode moving average across 5 seeds.</figcaption></figure>
+<p><b>Initial results.</b> The first episodes average about −780: the agent wanders for all 200 steps and makes many illegal pickups and drop-offs (−10 each). Once successful deliveries start propagating value back through the Q-table, the reward climbs steadily. The moving average crosses 0 at around episode <b>1,129</b> and levels off around <b>+7.4</b> over the last 200 episodes, close to the ~8.46 optimum. Under greedy evaluation the baseline delivers in <b>97.6%</b> of episodes with a mean reward of <b>3.08</b>. The remaining 2.4% are episodes where the greedy policy loops until the 200-step cutoff (−200). They come from start states the agent rarely visited, which tells me α = 0.1 hadn't fully converged Q in every reachable state after 3000 episodes.</p>
+
+<h2>(D) Learning-Rate Experiment</h2>
+<figure><img src="results/D_alpha.png"><figcaption>Figure 2. α ∈ {0.1, 0.5, 0.9} with γ = 0.99 and ε-decay = 0.995 held fixed. The y-axis is clipped at −250 so the converged region is readable.</figcaption></figure>
+<table>
+<tr><th>α</th><th>Episodes to MA ≥ 0</th><th>Mean reward, all 3000 eps</th><th>Final reward (last 200)</th><th>Std across seeds</th></tr>
+<tr><td>0.1</td><td>1129</td><td>−52.3</td><td>7.43</td><td>0.21</td></tr>
+<tr><td>0.5</td><td>494</td><td>−24.8</td><td>7.52</td><td>0.24</td></tr>
+<tr><td>0.9</td><td>491</td><td>−21.7</td><td>7.51</td><td>0.25</td></tr>
+</table>
+<p><b>Observations.</b> A larger α learns <b>more than twice as fast</b>: α = 0.5 and 0.9 reach a positive average in ~490 episodes, versus ~1,130 for α = 0.1. Final performance is nearly the same for all three (7.4–7.5). <b>Stability</b> is also about the same: the across-seed std is ~0.2 and the within-run std is ~3.5 for all three, and that within-run spread comes from random start positions, not from the learning rule. The usual argument for a small α is averaging out noisy targets. Taxi is <i>deterministic</i>, so each sample of r + γ max Q(s′,·) is already exact given the current Q, and a big step size doesn't hurt. Taking (nearly) the whole step at α = 0.9 moves each Q-value straight to its target. The gap between 0.5 and 0.9 is small because both are already fast enough that ε-decay, not α, becomes the bottleneck. Part H shows the other side: with stochastic transitions, a large α is a problem.</p>
+
+<h2>(E) Discount-Factor Experiment</h2>
+<figure><img src="results/E_gamma.png"><figcaption>Figure 3. γ ∈ {0.5, 0.9, 0.99} with α = 0.1 and ε-decay = 0.995 held fixed.</figcaption></figure>
+<table>
+<tr><th>γ</th><th>Episodes to MA ≥ 0</th><th>Final reward (last 200)</th><th>Greedy success rate</th><th>Greedy mean reward</th><th>Greedy mean steps</th></tr>
+<tr><td>0.5</td><td>2175</td><td>2.32</td><td>38.8%</td><td>−118.7</td><td>126.8</td></tr>
+<tr><td>0.9</td><td>1192</td><td>7.38</td><td>94.4%</td><td>−3.5</td><td>23.3</td></tr>
+<tr><td>0.99</td><td>1129</td><td>7.43</td><td>97.6%</td><td>3.1</td><td>17.4</td></tr>
+</table>
+<p><b>Immediate vs. future reward.</b> A Taxi trip takes about 10–16 steps, so the +20 delivery reward is always well in the future. With <b>γ = 0.5</b>, a reward 12 steps away is worth 20 × 0.5<sup>12</sup> ≈ 0.005, which rounds to nothing. Meanwhile the sum of the −1 step costs approaches −2 in every state. Far from the goal, every action's Q-value is about −2 and the differences that point toward the passenger disappear. The agent is effectively myopic: it learns to avoid the immediate −10 penalties but can't see the payoff. Its greedy policy completes only <b>39%</b> of episodes and loops in the rest, and it learns about twice as slowly. <b>γ = 0.9</b> carries enough signal over a ~15-step horizon (0.9<sup>15</sup> ≈ 0.21) to learn a good policy. <b>γ = 0.99</b> is slightly better and slightly faster here. Taxi rewards planning the whole trip, so a γ near 1 fits it best. A low γ would only make sense if the important rewards came within a few steps.</p>
+
+<h2>(F) Additional Hyperparameter: ε-Decay Rate</h2>
+<figure><img src="results/F_epsilon_decay.png"><figcaption>Figure 4. ε-decay ∈ {0.99, 0.995, 0.999} with α = 0.1 and γ = 0.99 held fixed.</figcaption></figure>
+<figure><img src="results/F_epsilon_schedules.png" style="width:80%"><figcaption>Figure 5. The three exploration schedules. 0.99 hits the 0.01 floor at ~ep 458, 0.995 at ~ep 919, and 0.999 is still at ε ≈ 0.05 at episode 3000.</figcaption></figure>
+<table>
+<tr><th>ε-decay</th><th>Episodes to MA ≥ 0</th><th>Mean reward, all 3000 eps</th><th>Final reward (last 200)</th></tr>
+<tr><td>0.99</td><td>1129</td><td>−38.1</td><td>7.33</td></tr>
+<tr><td>0.995</td><td>1129</td><td>−52.3</td><td>7.43</td></tr>
+<tr><td>0.999</td><td>2057</td><td>−122.0</td><td>4.96</td></tr>
+</table>
+<p><b>Effect on learning.</b> This is the classic explore/exploit trade-off. <b>0.999</b> explores far too long. ε stays above 0.2 for the first ~1,600 episodes, so the agent keeps taking random actions (including −10 pickups) even after it knows better. Its training reward only turns positive around episode 2,057, and it finishes at 4.96 because ε is still ~5% at the end. <b>0.99</b> exploits earliest, so it has the best area under the curve (−38.1). With α = 0.1, though, it stops exploring before every state's Q-values are refined, so its final reward ends up slightly below 0.995's. <b>0.995</b> gives the best final performance at this α. The best decay rate depends on α: a faster learner (α ≥ 0.5) can afford to stop exploring sooner, which Part G confirms.</p>
+
+<h2>(G) Best Agent Evaluation</h2>
+<p><b>How I chose the best configuration.</b> Parts D–F each change one parameter, but the parameters interact (see F). So I ran a grid of α ∈ {0.1, 0.5, 0.9} × γ ∈ {0.9, 0.99} × ε-decay ∈ {0.99, 0.995, 0.999}: 18 configurations × 5 seeds = 90 agents. I ranked them by final training reward (last 200 episodes, seed-averaged) and broke ties by mean reward over all episodes, which rewards faster learning. Top of the ranking:</p>
+<table>
+<tr><th>Rank</th><th>α</th><th>γ</th><th>ε-decay</th><th>Final reward</th><th>Mean reward, all 3000 eps</th><th>Episodes to MA ≥ 0</th></tr>
+<tr><td>1</td><td>0.5</td><td>0.9</td><td>0.99</td><td><b>7.62</b></td><td>−15.7</td><td>407</td></tr>
+<tr><td>2</td><td>0.5</td><td>0.99</td><td>0.99</td><td>7.59</td><td>−15.8</td><td>396</td></tr>
+<tr><td>3</td><td>0.9</td><td>0.99</td><td>0.995</td><td>7.51</td><td>−21.7</td><td>491</td></tr>
+<tr><td>—</td><td>0.1</td><td>0.99</td><td>0.995</td><td>7.43</td><td>−52.3</td><td>1129 <i>(baseline, rank 10)</i></td></tr>
+<tr><td>18</td><td>0.1</td><td>0.99</td><td>0.999</td><td>4.96</td><td>−122.0</td><td>2057</td></tr>
+</table>
+<p>The top two are essentially tied (7.62 vs. 7.59), so γ matters little once it's ≥ 0.9. The clear winners are the larger α combined with faster ε-decay, and every 0.999 configuration lands at the bottom. Full results for all 18 configurations are in <code>results/results.json</code>.</p>
+<figure><img src="results/G_best_vs_baseline.png"><figcaption>Figure 6. Best configuration (α = 0.5, γ = 0.9, ε-decay = 0.99) vs. the baseline.</figcaption></figure>
+<p><b>Greedy evaluation (ε = 0), 100 episodes × 5 trained seeds = 500 episodes</b> (well over the 30 required):</p>
+<table>
+<tr><th>Metric</th><th>Baseline</th><th>Best</th></tr>
+<tr><td>Mean reward</td><td>3.08</td><td><b>7.94</b> (optimum ≈ 8.46)</td></tr>
+<tr><td>Std of reward</td><td>31.15</td><td><b>2.51</b></td></tr>
+<tr><td>Success rate (passenger delivered)</td><td>97.6%</td><td><b>100%</b> (all 5 seeds)</td></tr>
+<tr><td>Mean steps per episode</td><td>17.4</td><td><b>13.1</b></td></tr>
+<tr><td>Worst episode</td><td>−200 (timeout loop)</td><td><b>+3</b></td></tr>
+<tr><td>Episodes to learn (MA ≥ 0)</td><td>1129</td><td><b>407</b> (2.8× faster)</td></tr>
+</table>
+<p>The best agent never fails, its worst episode is still positive, and its reward std drops from 31 to 2.5. The remaining spread just reflects how far apart the random start positions are. Its mean of 7.94 is within about 0.5 of the theoretical optimum. The rendered video (<code>results/taxi_trained_agent.mp4</code> in the repository) shows five greedy episodes, all delivered in 7–16 steps.</p>
+
+<h2>(H) Stochastic Environment (Extra Credit)</h2>
+<p><b>Noise source.</b> <code>NoisyActionWrapper</code> (a Gymnasium <code>ActionWrapper</code>) replaces the agent's chosen action with a <i>different</i> valid action, picked uniformly at random, with probability <i>p</i>. It has its own seeded RNG, so the noise is reproducible. I trained the best configuration (α = 0.5, γ = 0.9, decay 0.99) at p ∈ {0, 0.10, 0.25}, evaluated each agent at its own noise level, and also evaluated the <b>p = 0 policy under added noise</b>.</p>
+<figure><img src="results/H_noise_training.png"><figcaption>Figure 7. Training curves under action noise (best config, 5 seeds each).</figcaption></figure>
+<figure><img src="results/H_noise_eval.png"><figcaption>Figure 8. Greedy evaluation at each test noise level: agent trained at that noise level (blue) vs. the agent trained at p = 0 (orange).</figcaption></figure>
+<table>
+<tr><th>Test p</th><th>Trained at test p: reward / success / steps</th><th>Trained at p = 0: reward / success / steps</th><th>Follow-up (α = 0.1, 10k eps) trained at test p</th></tr>
+<tr><td>0</td><td>7.94 / 100% / 13.1</td><td>7.94 / 100% / 13.1</td><td>—</td></tr>
+<tr><td>0.10</td><td>−20.4 / 94.2% / 29.9</td><td>−0.10 / 100% / 16.0</td><td>0.78 / 100% / 15.5</td></tr>
+<tr><td>0.25</td><td>−111.7 / 80.8% / 68.4</td><td>−12.7 / 100% / 19.7</td><td>−18.0 / 100% / 22.5</td></tr>
+</table>
+<p><b>Learning speed and final reward.</b> Noise hurts both. At p = 0.10 and 0.25 the training moving average never reaches 0 within 3000 episodes, and final training reward drops from +7.6 to −24 and −113. Part of that cost is unavoidable: every random substitution wastes a step, and 2 of the 5 substitute actions are Pickup/Drop-off, which usually cost −10.</p>
+<p><b>Policy robustness.</b> The most interesting result is that the <b>p = 0 policy is the most robust</b>. It still delivers in 100% of episodes at both noise levels, and its reward degrades gradually (7.9 → −0.1 → −12.7) as it recovers from the random perturbations. The agents trained <i>with</i> noise using the "best" α = 0.5 did much worse: they sometimes looped until the time limit. The reason is that α = 0.5 was tuned for the deterministic environment. With stochastic transitions, each update target is a noisy sample, and a large constant α keeps chasing the latest sample instead of averaging, so Q never settles. To test this I retrained under noise with <b>α = 0.1 for 10,000 episodes</b> (<code>h_followup.py</code>). That fixed the failures (100% success at both noise levels) and slightly beat the p = 0 policy at p = 0.10 (0.78 vs. −0.10). At p = 0.25 it was still a bit worse (−18.0 vs. −12.7). That fits the structure of the noise: substitutions are spread uniformly over the other actions, so they barely change <i>which</i> action is best, and the optimal noisy-environment policy is close to the deterministic one. Training under noise then mostly adds variance to the Q-estimates. <b>Takeaways:</b> the deterministic-optimal α does not carry over to stochastic settings (use a smaller or decaying α and more episodes), and a policy learned cleanly can stay robust when the noise is unbiased.</p>
+
+<h2>Conclusions</h2>
+<ul>
+<li>Tabular Q-learning solves Taxi: the tuned agent delivers 100% of the time at 7.94 average reward (optimum ≈ 8.46).</li>
+<li><b>α:</b> in a deterministic environment, larger α (0.5–0.9) learns about 2.3× faster with no loss in stability or final performance.</li>
+<li><b>γ:</b> it has to cover the task's horizon. γ = 0.5 makes the agent myopic (39% success), while γ ≥ 0.9 works.</li>
+<li><b>ε-decay:</b> it interacts with α. Too slow (0.999) wastes most of training exploring, while a fast learner can exploit early (0.99).</li>
+<li><b>Noise:</b> it slows learning and lowers reward. Hyperparameters tuned for a deterministic environment (large α) don't carry over, while the clean policy degraded gracefully.</li>
+</ul>
+<p><b>Reproducibility:</b> <code>pip install -r requirements.txt</code>, then <code>python experiments.py</code>, <code>python h_followup.py</code>, <code>python record_video.py</code>. All numbers in this report come from <code>results/results.json</code> and <code>results/H_followup.json</code>.</p>
+</body></html>

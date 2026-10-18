@@ -1,0 +1,27 @@
+{
+  "config": {
+    "alpha": 0.1,
+    "gamma": 0.9,
+    "epsilon_start": 1.0,
+    "epsilon_min": 0.01,
+    "epsilon_decay": 0.999,
+    "episodes": 10000,
+    "q_init": 0.0,
+    "noise_p": 0.0,
+    "seed": 0
+  },
+  "eval": {
+    "0.1": {
+      "mean_reward": 0.7779999999999999,
+      "std_reward": 9.379013721741089,
+      "success_rate": 1.0,
+      "mean_steps": 15.524000000000001
+    },
+    "0.25": {
+      "mean_reward": -17.968000000000004,
+      "std_reward": 27.88968532323626,
+      "success_rate": 1.0,
+      "mean_steps": 22.462
+    }
+  }
+}

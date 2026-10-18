@@ -1,0 +1,4 @@
+gymnasium[toy-text]==1.4.0
+numpy>=2.0
+matplotlib>=3.8
+imageio[ffmpeg]>=2.34
